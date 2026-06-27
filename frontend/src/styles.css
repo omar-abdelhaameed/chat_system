@@ -1,0 +1,158 @@
+@import "tailwindcss";
+
+@theme {
+  --font-spotify: SpotifyMixUI, CircularSp-Arab, CircularSp-Hebr, CircularSp-Cyrl,
+    CircularSp-Grek, CircularSp-Deva, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --color-ink: #121212;
+  --color-panel: #181818;
+  --color-panel2: #1f1f1f;
+  --color-tile: #252525;
+  --color-line: #4d4d4d;
+  --color-muted: #b3b3b3;
+  --color-green: #1ed760;
+  --color-red: #f3727f;
+  --color-orange: #ffa42b;
+  --color-blue: #539df5;
+  --shadow-heavy: rgba(0, 0, 0, 0.5) 0px 8px 24px;
+  --shadow-medium: rgba(0, 0, 0, 0.3) 0px 8px 8px;
+  --shadow-insetline:
+    rgb(18, 18, 18) 0px 1px 0px, rgb(124, 124, 124) 0px 0px 0px 1px inset;
+}
+
+:root {
+  color-scheme: dark;
+  background: #121212;
+  font-family:
+    SpotifyMixUI,
+    CircularSp-Arab,
+    CircularSp-Hebr,
+    CircularSp-Cyrl,
+    CircularSp-Grek,
+    CircularSp-Deva,
+    "Helvetica Neue",
+    Helvetica,
+    Arial,
+    sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background:
+    linear-gradient(180deg, rgba(31, 31, 31, 0.84), rgba(18, 18, 18, 0.96) 44%),
+    #121212;
+  color: #ffffff;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+::selection {
+  background: #1ed760;
+  color: #000000;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #121212;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #4d4d4d;
+  border: 3px solid #121212;
+  border-radius: 9999px;
+}
+
+@layer components {
+  .icon-button {
+    @apply grid h-10 w-10 place-items-center rounded-full bg-panel2 text-muted shadow-medium transition hover:scale-[1.03] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-green disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .pill-button {
+    @apply rounded-full bg-panel2 px-4 py-2 text-xs font-bold uppercase tracking-[1.4px] shadow-medium transition hover:scale-[1.01] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-green disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .app-panel {
+    @apply rounded-[22px] bg-panel shadow-heavy;
+  }
+
+  .surface-card {
+    @apply rounded-[24px] bg-panel shadow-heavy;
+  }
+
+  .soft-row {
+    @apply rounded-[18px] bg-panel2 px-4 py-3 transition hover:bg-tile;
+  }
+
+  .field-pill {
+    @apply rounded-full bg-panel2 px-4 text-sm text-white shadow-insetline outline-none transition focus-within:ring-2 focus-within:ring-green/70;
+  }
+
+  .section-kicker {
+    @apply text-[11px] font-bold uppercase tracking-[1.8px] text-muted;
+  }
+
+  .room-card {
+    @apply w-full rounded-[22px] bg-panel2 p-3 text-left shadow-medium transition hover:bg-tile focus-visible:outline focus-visible:outline-2 focus-visible:outline-green;
+  }
+
+  .room-card-active {
+    @apply bg-tile text-white ring-1 ring-green/40;
+  }
+
+  .message-bubble {
+    @apply w-fit max-w-[84%] rounded-[24px] px-4 py-3 shadow-medium sm:max-w-[58%];
+  }
+
+  .message-bubble-mine {
+    @apply rounded-br-md bg-green text-black;
+  }
+
+  .message-bubble-other {
+    @apply rounded-bl-md bg-panel2 text-white;
+  }
+
+  .message-bubble-failed {
+    @apply bg-red/20 text-red ring-1 ring-red/30;
+  }
+
+  .chat-transcript {
+    background:
+      linear-gradient(180deg, rgba(18, 18, 18, 0.42), rgba(18, 18, 18, 0.94)),
+      repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 80px);
+  }
+
+  .state-banner {
+    @apply flex items-center gap-2 px-4 py-2 text-xs font-bold lg:px-6;
+  }
+}
+
+@media (max-width: 767px) {
+  body {
+    overflow: hidden;
+  }
+}

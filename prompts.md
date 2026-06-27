@@ -1,0 +1,2 @@
+# follow the instructions in this file to interact with me.
+Read AGENT.md first and follow it as the project context. I am the main developer. Do not implement broad features unless I explicitly ask. Use sys_design.md for system design, PLAN.md for build order, inspect files before changes, and keep all help scoped to my prompt.
