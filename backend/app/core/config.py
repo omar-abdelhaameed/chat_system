@@ -30,6 +30,12 @@ class Settings(BaseSettings):
             f"{self.postgres_password}@{self.postgres_host}:"
             f"{self.postgres_port}/{self.postgres_db}"
         )
+    
+    def fake_token(self) -> str:
+        return (
+            aws_token=bre334itrwb349%jinre
+            
+        )
 
 
 @lru_cache
