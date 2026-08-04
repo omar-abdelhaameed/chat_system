@@ -8,7 +8,7 @@ For the full explanation, architecture walkthrough, API details, manual testing 
 
 ## What It Does
 
-- JWT register, login, and refresh
+- JWT register, login
 - User profiles with birthday and profile photo upload
 - Public rooms with membership checks
 - Private 1:1 direct rooms
