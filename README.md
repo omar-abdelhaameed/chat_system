@@ -7,8 +7,7 @@ For the full explanation, architecture walkthrough, API details, manual testing 
 - [docs/APP_DOCUMENTATION.md](docs/APP_DOCUMENTATION.md)
 
 ## What It Does
-
-- JWT register, login, and refresh
+, and refresh
 - User profiles with birthday and profile photo upload
 - Public rooms with membership checks
 - Private 1:1 direct rooms
