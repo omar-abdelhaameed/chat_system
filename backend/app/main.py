@@ -47,7 +47,12 @@ async def shutdown() -> None:
     await close_rabbitmq()
     await close_redis()
 
-
+@app.get("/")
+async def root():
+    return {
+        "status": "ok",
+        "service": settings.app_name,
+    }
 @app.get("/health")
 async def health_check():
     return {
