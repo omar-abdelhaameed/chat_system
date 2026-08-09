@@ -85,10 +85,13 @@ pipeline {
                         returnStatus: true
                     )
                     echo "Kingfisher exited with code ${scanExit}"
+                    // exit 200/205 = findings present — mark build UNSTABLE, don't fail it
                     if (scanExit == 200 || scanExit == 205) {
+                        echo "Secret scan found findings — marking build UNSTABLE. See reports/kingfisher-findings.json"
                         currentBuild.result = 'UNSTABLE'
                     } else if (scanExit != 0) {
-                        error("Kingfisher scan failed unexpectedly (exit code ${scanExit})")}
+                        error("Kingfisher scan failed unexpectedly (exit code ${scanExit})")
+                    }
                 }
             }
         }
@@ -122,7 +125,8 @@ pipeline {
                         returnStatus: true
                     )
                     if (hasHighSeverity == 0) {
-                        error("SAST found HIGH/CRITICAL-equivalent (ERROR severity) findings — see reports/sast-findings.json")
+                        echo "SAST found findings — marking build UNSTABLE. See reports/sast-findings.json"
+                        currentBuild.result = 'UNSTABLE'
                     }
                 }
             }
@@ -172,9 +176,10 @@ pipeline {
                         docker rm -fv "zap-scan-$BUILD_NUMBER"
                     '''
 
-                    // zap-baseline.py: 0=pass, 1=warn, 2=fail-threshold reached (HIGH/CRITICAL-equivalent)
+                    // zap-baseline.py: 0=pass, 1=warn, 2=fail-threshold reached
                     if (dastExit == 2) {
-                        error("DAST found HIGH/CRITICAL-equivalent findings — see reports/dast-findings.json")
+                        echo "DAST found findings — marking build UNSTABLE. See reports/dast-findings.json"
+                        currentBuild.result = 'UNSTABLE'
                     } else if (dastExit != 0 && dastExit != 1) {
                         error("ZAP DAST scan failed unexpectedly (exit code ${dastExit})")
                     }
@@ -211,6 +216,11 @@ pipeline {
     post {
         success {
             echo "Build passed — tearing down CI stack '${PROJECT_NAME}'"
+            sh 'cd "$WORKSPACE" && docker compose -p ${PROJECT_NAME} ${COMPOSE_FILES} down -v || true'
+            sh 'docker rm -f "zap-scan-$BUILD_NUMBER" 2>/dev/null || true'
+        }
+        unstable {
+            echo "Build unstable (scan findings only, no pipeline error) — tearing down CI stack '${PROJECT_NAME}'"
             sh 'cd "$WORKSPACE" && docker compose -p ${PROJECT_NAME} ${COMPOSE_FILES} down -v || true'
             sh 'docker rm -f "zap-scan-$BUILD_NUMBER" 2>/dev/null || true'
         }
