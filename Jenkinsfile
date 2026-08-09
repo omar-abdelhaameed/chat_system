@@ -132,6 +132,20 @@ pipeline {
             }
         }
 
+        stage('Cleanup Previous CI Stacks') {
+            steps {
+                sh '''
+                    echo "Checking for leftover chat-system-ci-* stacks holding host ports..."
+                    for proj in $(docker compose ls --filter "name=chat-system-ci-" --format json | python3 -c "import json,sys; [print(p['Name']) for p in json.load(sys.stdin)]" 2>/dev/null || true); do
+                        if [ "$proj" != "$PROJECT_NAME" ]; then
+                            echo "Tearing down stale stack: $proj"
+                            docker compose -p "$proj" ${COMPOSE_FILES} down -v || true
+                        fi
+                    done
+                '''
+            }
+        }
+
         stage('Deploy App for DAST') {
             steps {
                 sh '''
