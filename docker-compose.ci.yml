@@ -1,0 +1,16 @@
+services:
+  fastapi:
+    ports: !reset []
+  fastapi-1:
+    ports: !reset []
+  fastapi-2:
+    ports: !reset []
+  nginx:
+    ports: !override
+      - "18080:80"
+  postgres:
+    ports: !reset []
+  redis:
+    ports: !reset []
+  rabbitmq:
+    ports: !reset []
