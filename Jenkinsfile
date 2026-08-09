@@ -133,6 +133,7 @@ pipeline {
                     ls -lah "$WORKSPACE/$REPORTS_DIR" || true
                 '''
             }
+            
         }
 
 
@@ -175,7 +176,7 @@ pipeline {
                         returnStatus: true
                     )
 
-                    echo "Kingfisher exited with code ${scanExit}"
+                    echo "Kingfisher exited with code ${scanExit}" if (scanExit == 200 || scanExit == 205) { currentBuild.result = 'UNSTABLE' } else if (scanExit != 0) { error("Kingfisher scan failed unexpectedly (exit code ${scanExit})") } } }
 
                     /*
                      * Kingfisher can return a non-zero status when findings
