@@ -18,36 +18,22 @@ pipeline {
     }
 
     environment {
-        // ------------------------------------------------------------
-        // Repository / application
-        // ------------------------------------------------------------
         COMPOSE_PROJECT_NAME = "chat-system-ci-${BUILD_NUMBER}"
         COMPOSE_FILES        = "-f docker-compose.yml -f docker-compose.ci.yml"
 
-        // Host-facing port used only for manual/browser validation.
         APP_HOST_PORT        = "18080"
 
-        // Internal Compose target used by ZAP.
         DAST_TARGET          = "http://nginx"
 
-        // ------------------------------------------------------------
-        // Security tools
-        // ------------------------------------------------------------
         KINGFISHER_IMAGE = "ghcr.io/mongodb/kingfisher:latest"
         SEMGREP_IMAGE    = "semgrep/semgrep:latest"
         ZAP_IMAGE        = "zaproxy/zap-stable:latest"
 
-        // ------------------------------------------------------------
-        // Report locations
-        // ------------------------------------------------------------
         REPORT_DIR = "reports"
     }
 
     stages {
 
-        // ============================================================
-        // 1. CHECKOUT
-        // ============================================================
         stage('Checkout') {
             steps {
                 deleteDir()
@@ -69,9 +55,6 @@ pipeline {
         }
 
 
-        // ============================================================
-        // 2. PREPARE
-        // ============================================================
         stage('Prepare Workspace') {
             steps {
                 sh '''
@@ -95,38 +78,37 @@ pipeline {
         }
 
 
-        // ============================================================
-        // 3. STATIC SECURITY
-        // ============================================================
         stage('Static Security Analysis') {
 
             parallel {
 
-                // ----------------------------------------------------
-                // 3A. Secret scanning
-                // ----------------------------------------------------
                 stage('Kingfisher - Secrets') {
-                    steps {
-                        sh '''
-                            set -eu
+    steps {
+        sh '''
+            set -eu
 
-                            echo "Running Kingfisher..."
+           
+            echo "Jenkins workspace: ${WORKSPACE}"
 
-                            docker run --rm \
-                                --user root \
-                                -v "$PWD:/workspace" \
-                                "${KINGFISHER_IMAGE}" \
-                                scan /workspace \
-                                -f json \
-                                -o "/workspace/${REPORT_DIR}/secrets/kingfisher.json"
-                        '''
-                    }
-                }
+            test -d "${WORKSPACE}"
+
+            docker run --rm \
+                --user root \
+                --volumes-from "$HOSTNAME" \
+                "${KINGFISHER_IMAGE}" \
+                scan "${WORKSPACE}" \
+                -f json \
+                -o "${WORKSPACE}/${REPORT_DIR}/secrets/kingfisher.json"
+
+            test -f "${WORKSPACE}/${REPORT_DIR}/secrets/kingfisher.json"
+
+            echo "Kingfisher report generated:"
+            ls -lh "${WORKSPACE}/${REPORT_DIR}/secrets/kingfisher.json"
+        '''
+    }
+}
 
 
-                // ----------------------------------------------------
-                // 3B. SAST
-                // ----------------------------------------------------
                 stage('Semgrep - SAST') {
                     steps {
                         sh '''
@@ -148,9 +130,6 @@ pipeline {
                 }
 
 
-                // ----------------------------------------------------
-                // 3C. Application tests
-                // ----------------------------------------------------
                 stage('Application Tests') {
                     steps {
                         sh '''
@@ -195,9 +174,6 @@ pipeline {
         }
 
 
-        // ============================================================
-        // 4. BUILD + DEPLOY CI ENVIRONMENT
-        // ============================================================
         stage('Deploy CI Environment') {
             steps {
                 sh '''
@@ -221,9 +197,6 @@ pipeline {
         }
 
 
-        // ============================================================
-        // 5. HEALTH CHECK
-        // ============================================================
         stage('Health Check') {
             steps {
                 sh '''
@@ -260,9 +233,6 @@ pipeline {
         }
 
 
-        // ============================================================
-        // 6. DAST
-        // ============================================================
         stage('DAST - OWASP ZAP') {
             steps {
                 script {
@@ -312,9 +282,6 @@ pipeline {
         }
 
 
-        // ============================================================
-        // 7. REPORT SUMMARY
-        // ============================================================
         stage('Security Report Summary') {
             steps {
                 sh '''
@@ -350,15 +317,8 @@ pipeline {
         }
     }
 
-
-    // =================================================================
-    // POST ACTIONS
-    // =================================================================
     post {
 
-        // ------------------------------------------------------------
-        // Always archive reports
-        // ------------------------------------------------------------
         always {
             archiveArtifacts(
                 artifacts: 'reports/**/*',
@@ -375,9 +335,6 @@ pipeline {
         }
 
 
-        // ------------------------------------------------------------
-        // Always clean the CI application
-        // ------------------------------------------------------------
         cleanup {
             sh '''
                 set +e
