@@ -6,6 +6,11 @@ services:
   fastapi-2:
     ports: !reset []
   nginx:
+    build:
+      context: .
+      dockerfile: nginx.Dockerfile
+    image: chat_system-nginx-ci:latest
+    volumes: !reset []
     ports: !override
       - "18080:80"
   postgres:
