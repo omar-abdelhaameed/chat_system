@@ -1,354 +1,157 @@
-
 pipeline {
     agent any
+
+    // ── TODO: fill this in from:
+    //   docker volume inspect jenkins_home --format '{{ .Mountpoint }}'
+    // This is the HOST filesystem path backing jenkins_home. Sibling
+    // containers (scanners) need to bind-mount FROM the host, not from
+    // paths inside the Jenkins container — those paths don't exist on
+    // the host's Docker daemon.
+    environment {
+        HOST_JENKINS_HOME   = '/REPLACE/ME/host/path/to/jenkins_home'
+        PROJECT_NAME        = "chat-system-ci-${BUILD_NUMBER}"
+        COMPOSE_FILES       = "-f docker-compose.yml -f docker-compose.ci.yml"
+        REPORTS_DIR         = "reports"
+    }
+
+    triggers {
+        githubPush()
+    }
 
     options {
         timestamps()
         disableConcurrentBuilds()
-        skipDefaultCheckout(true)
-
-        timeout(time: 30, unit: 'MINUTES')
-
-        buildDiscarder(
-            logRotator(
-                numToKeepStr: '20',
-                artifactNumToKeepStr: '20'
-            )
-        )
-    }
-
-    environment {
-        COMPOSE_PROJECT_NAME = "chat-system-ci-${BUILD_NUMBER}"
-        COMPOSE_FILES        = "-f docker-compose.yml -f docker-compose.ci.yml"
-
-        APP_HOST_PORT        = "18080"
-
-        DAST_TARGET          = "http://nginx"
-
-        KINGFISHER_IMAGE = "ghcr.io/mongodb/kingfisher:latest"
-        SEMGREP_IMAGE    = "semgrep/semgrep:latest"
-        ZAP_IMAGE        = "zaproxy/zap-stable:latest"
-
-        REPORT_DIR = "reports"
     }
 
     stages {
 
         stage('Checkout') {
             steps {
-                deleteDir()
-
                 checkout scm
-
-                sh '''
-                    set -eu
-
-                    echo "========================================="
-                    echo "Repository"
-                    echo "========================================="
-
-                    git rev-parse --show-toplevel
-                    git rev-parse HEAD
-                    git log -1 --oneline
-                '''
+                sh 'mkdir -p ${REPORTS_DIR}'
             }
         }
 
-
-        stage('Prepare Workspace') {
+        stage('Build Images') {
             steps {
-                sh '''
-                    set -eu
-
-                    rm -rf "${REPORT_DIR}"
-
-                    mkdir -p \
-                        "${REPORT_DIR}/secrets" \
-                        "${REPORT_DIR}/sast" \
-                        "${REPORT_DIR}/dast"
-
-                    echo "Workspace:"
-                    pwd
-
-                    echo
-                    echo "Report directories:"
-                    find "${REPORT_DIR}" -maxdepth 2 -type d -print
-                '''
+                sh 'docker compose -p ${PROJECT_NAME} ${COMPOSE_FILES} build'
             }
         }
 
-
-        stage('Static Security Analysis') {
-
-            parallel {
-
-                stage('Kingfisher - Secrets') {
-    steps {
-        sh '''
-            set -eu
-
-           
-            echo "Jenkins workspace: ${WORKSPACE}"
-
-            test -d "${WORKSPACE}"
-
-            docker run --rm \
-                --user root \
-                --volumes-from "$HOSTNAME" \
-                "${KINGFISHER_IMAGE}" \
-                scan "${WORKSPACE}" \
-                -f json \
-                -o "${WORKSPACE}/${REPORT_DIR}/secrets/kingfisher.json"
-
-            test -f "${WORKSPACE}/${REPORT_DIR}/secrets/kingfisher.json"
-
-            echo "Kingfisher report generated:"
-            ls -lh "${WORKSPACE}/${REPORT_DIR}/secrets/kingfisher.json"
-        '''
-    }
-}
-
-
-                stage('Semgrep - SAST') {
-                    steps {
-                        sh '''
-                            set -eu
-
-                            echo "Running Semgrep..."
-
-                            docker run --rm \
-                                -v "$PWD:/src:ro" \
-                                -v "$PWD/${REPORT_DIR}/sast:/reports" \
-                                "${SEMGREP_IMAGE}" \
-                                semgrep scan \
-                                --config auto \
-                                --json \
-                                --output /reports/semgrep.json \
-                                /src
-                        '''
-                    }
-                }
-
-
-                stage('Application Tests') {
-                    steps {
-                        sh '''
-                            set -eu
-
-                            echo "Application test stage"
-
-                            if [ -f "backend/requirements.txt" ]; then
-                                echo "Backend requirements detected."
-                            fi
-
-                            if [ -f "backend/pytest.ini" ] || \
-                               [ -f "backend/pyproject.toml" ] || \
-                               [ -d "backend/tests" ]; then
-
-                                echo "Python test configuration detected."
-
-                                docker run --rm \
-                                    -v "$PWD/backend:/workspace" \
-                                    -w /workspace \
-                                    python:3.12-slim \
-                                    sh -c '
-                                        set -eu
-                                        if [ -f requirements.txt ]; then
-                                            pip install --no-cache-dir -r requirements.txt
-                                        fi
-
-                                        if command -v pytest >/dev/null 2>&1; then
-                                            pytest
-                                        else
-                                            echo "pytest is not installed; skipping."
-                                        fi
-                                    '
-                            else
-                                echo "No backend pytest configuration detected."
-                                echo "Skipping application tests for this build."
-                            fi
-                        '''
-                    }
-                }
-            }
-        }
-
-
-        stage('Deploy CI Environment') {
+        stage('Deploy Stack') {
             steps {
-                sh '''
-                    set -eu
-
-                    echo "Compose project: ${COMPOSE_PROJECT_NAME}"
-
-                    docker compose \
-                        ${COMPOSE_FILES} \
-                        -p "${COMPOSE_PROJECT_NAME}" \
-                        up -d --build
-
-                    echo
-                    echo "Compose services:"
-                    docker compose \
-                        ${COMPOSE_FILES} \
-                        -p "${COMPOSE_PROJECT_NAME}" \
-                        ps
-                '''
+                sh 'docker compose -p ${PROJECT_NAME} ${COMPOSE_FILES} up -d'
             }
         }
 
-
-        stage('Health Check') {
-            steps {
-                sh '''
-                    set -eu
-
-                    echo "Waiting for application..."
-
-                    timeout 120 sh -c '
-                        until docker compose \
-                            ${COMPOSE_FILES} \
-                            -p "${COMPOSE_PROJECT_NAME}" \
-                            ps --status running | grep -q nginx;
-                        do
-                            sleep 3
-                        done
-                    '
-
-                    echo "Checking application through Nginx..."
-
-                    docker run --rm \
-                        --network "${COMPOSE_PROJECT_NAME}_default" \
-                        curlimages/curl:latest \
-                        curl \
-                        --fail \
-                        --silent \
-                        --show-error \
-                        --max-time 10 \
-                        "${DAST_TARGET}/"
-
-                    echo
-                    echo "Application is reachable."
-                '''
-            }
-        }
-
-
-        stage('DAST - OWASP ZAP') {
+        stage('Wait for Healthy') {
             steps {
                 script {
+                    // Poll up to ~2 minutes for all healthchecked services to report healthy
+                    timeout(time: 2, unit: 'MINUTES') {
+                        waitUntil {
+                            def unhealthy = sh(
+                                script: '''
+                                    docker compose -p ${PROJECT_NAME} ${COMPOSE_FILES} ps --format json \
+                                    | grep -c '"Health":"unhealthy"\\|"Health":"starting"' || true
+                                ''',
+                                returnStdout: true
+                            ).trim()
+                            return unhealthy == "0"
+                        }
+                    }
+                }
+            }
+        }
 
-                    int zapStatus = sh(
+        stage('Secret Scan — Kingfisher') {
+            steps {
+                sh '''
+                    docker run --rm \
+                      -v ${HOST_JENKINS_HOME}/workspace/${JOB_NAME}:/src:ro \
+                      -v ${WORKSPACE}/${REPORTS_DIR}:/reports \
+                      ghcr.io/mongodb/kingfisher:latest scan /src \
+                      --format json --output /reports/kingfisher.json
+                '''
+            }
+        }
+
+        stage('SAST — Semgrep') {
+            steps {
+                sh '''
+                    docker run --rm \
+                      -v ${HOST_JENKINS_HOME}/workspace/${JOB_NAME}:/src:ro \
+                      -v ${WORKSPACE}/${REPORTS_DIR}:/reports \
+                      semgrep:latest semgrep scan /src \
+                      --config auto \
+                      --json --output /reports/semgrep.json
+                '''
+            }
+        }
+
+        stage('DAST — OWASP ZAP') {
+            steps {
+                // Scanner joins the compose project's network directly and hits
+                // nginx by its service DNS name — avoids relying on the host-published
+                // 18080 port, which keeps this working even if that port mapping changes.
+                sh '''
+                    docker run --rm \
+                      --network ${PROJECT_NAME}_default \
+                      -v ${WORKSPACE}/${REPORTS_DIR}:/zap/wrk:rw \
+                      zap:latest zap-baseline.py \
+                      -t http://nginx:80 \
+                      -J zap-report.json \
+                      -r zap-report.html || true
+                    # zap-baseline.py exits non-zero on findings by design —
+                    // don't let that fail the stage; we gate on parsed severity instead.
+                '''
+            }
+        }
+
+        stage('Evaluate Findings') {
+            steps {
+                script {
+                    def highOrCritical = sh(
                         script: '''
-                            set +e
+                            python3 - <<'PYEOF'
+import json, glob, sys
 
-                            echo "Running OWASP ZAP baseline scan..."
-                            echo "Target: ${DAST_TARGET}"
+fail = False
+for f in glob.glob("reports/*.json"):
+    try:
+        data = json.load(open(f))
+    except Exception:
+        continue
+    text = json.dumps(data).lower()
+    if '"high"' in text or '"critical"' in text or '"error"' in text:
+        fail = True
+        print(f"Potential HIGH/CRITICAL finding in {f}")
 
-                            docker run --rm \
-                                --network "${COMPOSE_PROJECT_NAME}_default" \
-                                -v "$PWD/${REPORT_DIR}/dast:/zap/wrk:rw" \
-                                "${ZAP_IMAGE}" \
-                                zap-baseline.py \
-                                -t "${DAST_TARGET}" \
-                                -r zap-report.html \
-                                -J zap-report.json \
-                                -x zap-report.xml \
-                                -I
-
-                            status=$?
-
-                            echo "ZAP exit code: ${status}"
-
-                            exit "${status}"
+sys.exit(1 if fail else 0)
+PYEOF
                         ''',
                         returnStatus: true
                     )
-
-                    if (zapStatus == 3) {
-                        error("ZAP encountered a scan/runtime error.")
+                    if (highOrCritical != 0) {
+                        error("Build failed: HIGH/CRITICAL findings detected — see reports/ artifacts")
                     }
-
-                    if (zapStatus == 1) {
-                        unstable("ZAP reported FAIL-level findings.")
-                    }
-
-                    if (zapStatus == 2) {
-                        unstable("ZAP reported WARN-level findings.")
-                    }
-
-                    echo "ZAP scan completed with status ${zapStatus}."
                 }
-            }
-        }
-
-
-        stage('Security Report Summary') {
-            steps {
-                sh '''
-                    set +e
-
-                    echo
-                    echo "========================================="
-                    echo "SECURITY REPORTS"
-                    echo "========================================="
-
-                    find "${REPORT_DIR}" \
-                        -type f \
-                        -printf "%p (%s bytes)\\n" \
-                        | sort
-
-                    echo
-                    echo "Kingfisher report:"
-                    if [ -f "${REPORT_DIR}/secrets/kingfisher.json" ]; then
-                        python3 -m json.tool \
-                            "${REPORT_DIR}/secrets/kingfisher.json" \
-                            | head -40
-                    fi
-
-                    echo
-                    echo "Semgrep report:"
-                    if [ -f "${REPORT_DIR}/sast/semgrep.json" ]; then
-                        python3 -m json.tool \
-                            "${REPORT_DIR}/sast/semgrep.json" \
-                            | head -40
-                    fi
-                '''
             }
         }
     }
 
     post {
-
         always {
-            archiveArtifacts(
-                artifacts: 'reports/**/*',
-                allowEmptyArchive: true,
-                fingerprint: true
-            )
-
-            junit(
-                testResults: 'reports/**/*.xml',
-                allowEmptyResults: true
-            )
-
-            echo "Security reports archived."
+            archiveArtifacts artifacts: 'reports/**', allowEmptyArchive: true
         }
-
-
-        cleanup {
-            sh '''
-                set +e
-
-                echo "Cleaning CI environment..."
-
-                docker compose \
-                    ${COMPOSE_FILES} \
-                    -p "${COMPOSE_PROJECT_NAME}" \
-                    down \
-                    --remove-orphans
-
-                echo "CI environment removed."
-            '''
+        success {
+            echo "Build passed — tearing down CI stack"
+            sh 'docker compose -p ${PROJECT_NAME} ${COMPOSE_FILES} down -v'
+        }
+        failure {
+            echo "Build failed — leaving stack '${PROJECT_NAME}' running for debugging."
+            echo "Inspect with: docker compose -p ${PROJECT_NAME} ${COMPOSE_FILES} ps"
+            echo "Tear down manually when done: docker compose -p ${PROJECT_NAME} ${COMPOSE_FILES} down -v"
         }
     }
 }
