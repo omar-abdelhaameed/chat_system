@@ -1,4 +1,4 @@
-```groovy
+
 pipeline {
     agent any
 
@@ -723,4 +723,3 @@ PY
         }
     }
 }
-```
