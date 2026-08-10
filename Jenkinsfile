@@ -1,3 +1,13 @@
+def notifyGitHub(String state, String context, String description) {
+    sh """
+        curl -s -X POST \\
+          -H "Authorization: token ${env.GITHUB_TOKEN}" \\
+          -H "Accept: application/vnd.github+json" \\
+          "https://api.github.com/repos/${env.GITHUB_REPO}/statuses/${env.GIT_SHA}" \\
+          -d '{"state":"${state}","context":"${context}","description":"${description}","target_url":"${env.BUILD_URL}"}'
+    """
+}
+
 pipeline {
     agent any
 
@@ -22,6 +32,8 @@ pipeline {
         // nginx is the only service published to the host under docker-compose.ci.yml (18080:80).
         // fastapi/fastapi-1/fastapi-2/postgres/redis/rabbitmq are internal-network-only.
         DAST_TARGET_URL = 'http://localhost:18080/docs'
+        GITHUB_REPO     = 'omar-abdelhaameed/chat_system'
+        GITHUB_TOKEN    = credentials('github-token')
     }
 
     stages {
@@ -31,6 +43,28 @@ pipeline {
                 deleteDir()
                 git branch: 'main',
                     url: 'https://github.com/omar-abdelhaameed/chat_system.git'
+            }
+        }
+
+        stage('Resolve Commit Info') {
+            steps {
+                script {
+                    env.GIT_SHA = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                    echo "Resolved commit SHA: ${env.GIT_SHA}"
+                }
+            }
+        }
+
+        stage('Notify GitHub (Pending)') {
+            steps {
+                script {
+                    env.SECRETS_REPORTED = 'false'
+                    env.SAST_REPORTED    = 'false'
+                    env.DAST_REPORTED    = 'false'
+                    notifyGitHub('pending', 'ci/secrets-scan', 'Kingfisher secret scan running...')
+                    notifyGitHub('pending', 'ci/sast', 'Semgrep SAST scan running...')
+                    notifyGitHub('pending', 'ci/dast', 'OWASP ZAP DAST scan queued...')
+                }
             }
         }
 
@@ -89,9 +123,15 @@ pipeline {
                     if (scanExit == 200 || scanExit == 205) {
                         echo "Secret scan found findings — marking build UNSTABLE. See reports/kingfisher-findings.json"
                         currentBuild.result = 'UNSTABLE'
+                        notifyGitHub('failure', 'ci/secrets-scan', 'Kingfisher found secret(s) — see build artifacts')
                     } else if (scanExit != 0) {
+                        notifyGitHub('error', 'ci/secrets-scan', 'Kingfisher scan errored unexpectedly')
+                        env.SECRETS_REPORTED = 'true'
                         error("Kingfisher scan failed unexpectedly (exit code ${scanExit})")
+                    } else {
+                        notifyGitHub('success', 'ci/secrets-scan', 'No secrets found')
                     }
+                    env.SECRETS_REPORTED = 'true'
                 }
             }
         }
@@ -114,6 +154,8 @@ pipeline {
                     )
                     echo "Semgrep exited with code ${sastExit}"
                     if (sastExit != 0 && sastExit != 1) {
+                        notifyGitHub('error', 'ci/sast', 'Semgrep scan errored unexpectedly')
+                        env.SAST_REPORTED = 'true'
                         error("Semgrep SAST scan failed unexpectedly (exit code ${sastExit})")
                     }
                     // Semgrep's own exit 1 just means "any finding present", not severity —
@@ -127,7 +169,11 @@ pipeline {
                     if (hasHighSeverity == 0) {
                         echo "SAST found findings — marking build UNSTABLE. See reports/sast-findings.json"
                         currentBuild.result = 'UNSTABLE'
+                        notifyGitHub('failure', 'ci/sast', 'Semgrep found ERROR-severity findings — see build artifacts')
+                    } else {
+                        notifyGitHub('success', 'ci/sast', 'No high-severity findings')
                     }
+                    env.SAST_REPORTED = 'true'
                 }
             }
         }
@@ -135,13 +181,22 @@ pipeline {
         stage('Cleanup Previous CI Stacks') {
             steps {
                 sh '''
-                    echo "Checking for leftover chat-system-ci-* stacks holding host ports..."
-                    for proj in $(docker compose ls --filter "name=chat-system-ci-" --format json | python3 -c "import json,sys; [print(p['Name']) for p in json.load(sys.stdin)]" 2>/dev/null || true); do
-                        if [ "$proj" != "$PROJECT_NAME" ]; then
-                            echo "Tearing down stale stack: $proj"
-                            docker compose -p "$proj" ${COMPOSE_FILES} down -v || true
-                        fi
-                    done
+                    echo "Checking for containers currently holding host port 18080..."
+                    STALE_CONTAINERS=$(docker ps -aq --filter "publish=18080")
+                    if [ -n "$STALE_CONTAINERS" ]; then
+                        for c in $STALE_CONTAINERS; do
+                            proj=$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$c" 2>/dev/null || true)
+                            if [ -n "$proj" ] && [ "$proj" != "$PROJECT_NAME" ]; then
+                                echo "Container $c (project: $proj) holds port 18080 — tearing down that project"
+                                docker compose -p "$proj" ${COMPOSE_FILES} down -v || true
+                            else
+                                echo "Container $c has no resolvable compose project — removing directly"
+                                docker rm -f "$c" || true
+                            fi
+                        done
+                    else
+                        echo "No stale containers holding port 18080."
+                    fi
                 '''
             }
         }
@@ -194,9 +249,15 @@ pipeline {
                     if (dastExit == 2) {
                         echo "DAST found findings — marking build UNSTABLE. See reports/dast-findings.json"
                         currentBuild.result = 'UNSTABLE'
+                        notifyGitHub('failure', 'ci/dast', 'ZAP found fail-threshold findings — see build artifacts')
                     } else if (dastExit != 0 && dastExit != 1) {
+                        notifyGitHub('error', 'ci/dast', 'ZAP scan errored unexpectedly')
+                        env.DAST_REPORTED = 'true'
                         error("ZAP DAST scan failed unexpectedly (exit code ${dastExit})")
+                    } else {
+                        notifyGitHub('success', 'ci/dast', 'No fail-threshold findings')
                     }
+                    env.DAST_REPORTED = 'true'
                 }
             }
         }
@@ -243,6 +304,19 @@ pipeline {
             echo "Inspect with: docker compose -p ${PROJECT_NAME} ${COMPOSE_FILES} ps"
             echo "Tear down manually when done: docker compose -p ${PROJECT_NAME} ${COMPOSE_FILES} down -v"
             sh 'docker rm -f "zap-scan-$BUILD_NUMBER" 2>/dev/null || true'
+            script {
+                if (env.GIT_SHA) {
+                    if (env.SECRETS_REPORTED != 'true') {
+                        notifyGitHub('error', 'ci/secrets-scan', 'Skipped — earlier pipeline failure')
+                    }
+                    if (env.SAST_REPORTED != 'true') {
+                        notifyGitHub('error', 'ci/sast', 'Skipped — earlier pipeline failure')
+                    }
+                    if (env.DAST_REPORTED != 'true') {
+                        notifyGitHub('error', 'ci/dast', 'Skipped — earlier pipeline failure')
+                    }
+                }
+            }
         }
         always {
             echo "Pipeline finished with result: ${currentBuild.result ?: 'SUCCESS'}"
