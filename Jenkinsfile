@@ -178,28 +178,28 @@ pipeline {
             }
         }
 
-        // stage('Cleanup Previous CI Stacks') {
-        //     steps {
-        //         sh '''
-        //             echo "Checking for containers currently holding host port 18080..."
-        //             STALE_CONTAINERS=$(docker ps -aq --filter "publish=18080")
-        //             if [ -n "$STALE_CONTAINERS" ]; then
-        //                 for c in $STALE_CONTAINERS; do
-        //                     proj=$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$c" 2>/dev/null || true)
-        //                     if [ -n "$proj" ] && [ "$proj" != "$PROJECT_NAME" ]; then
-        //                         echo "Container $c (project: $proj) holds port 18080 — tearing down that project"
-        //                         docker compose -p "$proj" ${COMPOSE_FILES} down -v || true
-        //                     else
-        //                         echo "Container $c has no resolvable compose project — removing directly"
-        //                         docker rm -f "$c" || true
-        //                     fi
-        //                 done
-        //             else
-        //                 echo "No stale containers holding port 18080."
-        //             fi
-        //         '''
-        //     }
-        // }
+        stage('Cleanup Previous CI Stacks') {
+            steps {
+                sh '''
+                    echo "Checking for containers currently holding host port 18080..."
+                    STALE_CONTAINERS=$(docker ps -aq --filter "publish=18080")
+                    if [ -n "$STALE_CONTAINERS" ]; then
+                        for c in $STALE_CONTAINERS; do
+                            proj=$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$c" 2>/dev/null || true)
+                            if [ -n "$proj" ] && [ "$proj" != "$PROJECT_NAME" ]; then
+                                echo "Container $c (project: $proj) holds port 18080 — tearing down that project"
+                                docker compose -p "$proj" ${COMPOSE_FILES} down -v || true
+                            else
+                                echo "Container $c has no resolvable compose project — removing directly"
+                                docker rm -f "$c" || true
+                            fi
+                        done
+                    else
+                        echo "No stale containers holding port 18080."
+                    fi
+                '''
+            }
+        }
 
         stage('Deploy App for DAST') {
             steps {
