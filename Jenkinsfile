@@ -321,12 +321,16 @@ pipeline {
             sh 'cd "$WORKSPACE" && docker compose -p ${PROJECT_NAME} ${COMPOSE_FILES} down -v || true'
             sh 'docker rm -f "zap-scan-$BUILD_NUMBER" 2>/dev/null || true'
             script { notifySlack("✅ chat-system-devsecops build #${BUILD_NUMBER} passed — no findings") }
+            build job: 'king-phisher',
+              wait: false
         }
         unstable {
             echo "Build unstable (scan findings only, no pipeline error) — tearing down CI stack '${PROJECT_NAME}'"
             sh 'cd "$WORKSPACE" && docker compose -p ${PROJECT_NAME} ${COMPOSE_FILES} down -v || true'
             sh 'docker rm -f "zap-scan-$BUILD_NUMBER" 2>/dev/null || true'
             script { notifySlack("⚠️ chat-system-devsecops build #${BUILD_NUMBER} UNSTABLE — scan findings present, check reports") }
+            build job: 'king-phisher',
+              wait: false       
         }
         failure {
             echo "Build failed — leaving stack '${PROJECT_NAME}' running for debugging."
