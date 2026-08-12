@@ -8,6 +8,23 @@ def notifyGitHub(String state, String context, String description) {
     """
 }
 
+def notifySlack(String text) {
+    sh """
+        curl -s -X POST -H 'Content-type: application/json' \\
+            --data '{"text":"${text}"}' \\
+            "\$SLACK_WEBHOOK_URL"
+    """
+}
+
+def recordFindingsRun(String status) {
+    sh """
+        docker network create devsecops-net || true
+        docker run --rm --network devsecops-net postgres:13 \\
+        psql "postgresql://devsecops:devsecops-findings-pw@devsecops-findings-db/devsecops" \\
+        -c "INSERT INTO pipeline_runs (pipeline_name, build_number, git_commit, status) VALUES ('chat-system-devsecops', ${BUILD_NUMBER}, '${env.GIT_SHA ?: ""}', '${status}');" || true
+    """
+}
+
 pipeline {
     agent any
 
@@ -27,13 +44,14 @@ pipeline {
     }
 
     environment {
-        PROJECT_NAME    = "chat-system-ci-${BUILD_NUMBER}"
-        COMPOSE_FILES   = "-f docker-compose.yml -f docker-compose.ci.yml"
+        PROJECT_NAME      = "chat-system-ci-${BUILD_NUMBER}"
+        COMPOSE_FILES     = "-f docker-compose.yml -f docker-compose.ci.yml"
         // nginx is the only service published to the host under docker-compose.ci.yml (18080:80).
         // fastapi/fastapi-1/fastapi-2/postgres/redis/rabbitmq are internal-network-only.
-        DAST_TARGET_URL = 'http://localhost:18080/docs'
-        GITHUB_REPO     = 'omar-abdelhaameed/chat_system'
-        GITHUB_TOKEN    = credentials('github-token')
+        DAST_TARGET_URL   = 'http://localhost:18080/docs'
+        GITHUB_REPO       = 'omar-abdelhaameed/chat_system'
+        GITHUB_TOKEN      = credentials('github-token')
+        SLACK_WEBHOOK_URL = credentials('slack-webhook-url')
     }
 
     stages {
@@ -302,11 +320,13 @@ pipeline {
             echo "Build passed — tearing down CI stack '${PROJECT_NAME}'"
             sh 'cd "$WORKSPACE" && docker compose -p ${PROJECT_NAME} ${COMPOSE_FILES} down -v || true'
             sh 'docker rm -f "zap-scan-$BUILD_NUMBER" 2>/dev/null || true'
+            script { notifySlack("✅ chat-system-devsecops build #${BUILD_NUMBER} passed — no findings") }
         }
         unstable {
             echo "Build unstable (scan findings only, no pipeline error) — tearing down CI stack '${PROJECT_NAME}'"
             sh 'cd "$WORKSPACE" && docker compose -p ${PROJECT_NAME} ${COMPOSE_FILES} down -v || true'
             sh 'docker rm -f "zap-scan-$BUILD_NUMBER" 2>/dev/null || true'
+            script { notifySlack("⚠️ chat-system-devsecops build #${BUILD_NUMBER} UNSTABLE — scan findings present, check reports") }
         }
         failure {
             echo "Build failed — leaving stack '${PROJECT_NAME}' running for debugging."
@@ -325,12 +345,14 @@ pipeline {
                         notifyGitHub('error', 'ci/dast', 'Skipped — earlier pipeline failure')
                     }
                 }
+                notifySlack("❌ chat-system-devsecops build #${BUILD_NUMBER} FAILED — pipeline error, check console output")
             }
         }
         always {
             echo "Pipeline finished with result: ${currentBuild.result ?: 'SUCCESS'}"
             sh 'cd "$WORKSPACE" && docker-compose down -v || true'
             sh 'docker rm -f "zap-scan-$BUILD_NUMBER" 2>/dev/null || true'
+            script { recordFindingsRun(currentBuild.currentResult ?: 'SUCCESS') }
         }
     }
 }
